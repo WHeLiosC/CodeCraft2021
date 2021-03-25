@@ -183,7 +183,7 @@ private:
     vector<Server> coreLgMemoryServerVec;            // CPU核数大于内存的类型的服务器向量
     vector<Server> memoryLgCoreServerVec;            // 内存大于CPU核数的类型的服务器向量
     vector<VM> vmTypeVec;                            // 所有类型的虚拟机向量
-    vector<pair<int, Server>> ownedServerVec;        // 拥有的服务器向量  <服务器id，服务器>
+    unordered_map<int, Server> ownedServerMap;       // 拥有的服务器向量  <服务器id，服务器>
     map<string, int> purchaseServerOneDay;           // 一天中购买的服务器 <类型, 数量>
     unordered_map<int, VMDeployInfo> deployedVM;     // 所有的部署的虚拟机 <虚拟机id, 部署信息>
     vector<pair<int, VMDeployInfo>> deployVMOneDay;  // 一天中部署的虚拟机 <虚拟机id, 部署信息>
@@ -263,9 +263,8 @@ public:
         }  // end if(vm.core <= vm.memory)
 
         Server pServer = getServerByType(purchaseServerType, coreLgMemory);
-        pair<int, Server> server(nextTempId, pServer);
+        ownedServerMap.emplace(nextTempId, pServer);
         nextTempId--;  // 每次id减一
-        ownedServerVec.push_back(server);
         if (purchaseServerOneDay.find(purchaseServerType) != purchaseServerOneDay.end()) {  // 存在该类型的服务器
             purchaseServerOneDay[purchaseServerType] += 1;
         } else {
@@ -298,7 +297,7 @@ public:
 
         if (!is_dual) {  // 单节点部署
             if (vm.core > vm.memory) {  // 虚拟机CPU核数大于内存数
-                for (auto &it: ownedServerVec) {  // 遍历服务器
+                for (auto &it: ownedServerMap) {  // 遍历服务器
                     int serverId = it.first;
                     Server server = it.second;
                     // 在CPU核数大于内存数的服务器节点中找
@@ -331,7 +330,7 @@ public:
                     }
                 }
             } else {  // vm.core <= vm.memory  vm.core==vm.memory的情况要不要单独拿出来？
-                for (auto &it: ownedServerVec) {  // 遍历服务器
+                for (auto &it: ownedServerMap) {  // 遍历服务器
                     int serverId = it.first;
                     Server server = it.second;
                     // 在CPU核数小于等于内存数的服务器节点中找
@@ -368,7 +367,7 @@ public:
 
         if (is_dual) {  // 双节点部署
             if (vm.core > vm.memory) {
-                for (const auto &it: ownedServerVec) {
+                for (const auto &it: ownedServerMap) {
                     int serverId = it.first;
                     Server server = it.second;
                     int sACore = server.getAAvailableCore();
@@ -395,7 +394,7 @@ public:
             }  // end if(vm.core > vm.memory)
 
             if (vm.core <= vm.memory) {
-                for (const auto &it: ownedServerVec) {
+                for (const auto &it: ownedServerMap) {
                     int serverId = it.first;
                     Server server = it.second;
                     int sACore = server.getAAvailableCore();
@@ -424,12 +423,7 @@ public:
 
         /* 即使没有以上条件的服务器，是否再遍历一遍，能部署就部署? */
         if (!isNeedPurchase) {  // 不需要购买新的服务器
-            auto it = ownedServerVec.begin();
-            for (; it != ownedServerVec.end(); it++) {  // 根据id在拥有的服务器中寻找
-                if (it->first == sid) {
-                    break;
-                }
-            }
+            auto it = ownedServerMap.find(sid);
             if (it->second.allocate(vm.core, vm.memory, node)) {  // 返回引用问题
                 VMDeployInfo info = VMDeployInfo(sid, node, vm);
                 pair<int, VMDeployInfo> deployedVMInfo(vmId, info);
@@ -437,17 +431,17 @@ public:
             }
         } else {  // 需要购买服务器
             purchaseServer(vm, totalDay - currDay);
-            auto &it = ownedServerVec.back();  // 购买的服务器放在最后，back返回的是reference，end返回的是iterator
-            int pServerId = it.first;
+            auto it = ownedServerMap.find(nextTempId + 1);  // 购买服务器後，nextTempId減一，所以買的服務器id爲加一後的值
+            int pServerId = it->first;
             if (!is_dual) {  // 单节点直接部署到A节点上
-                if (it.second.allocate(vm.core, vm.memory, "A")) {
+                if (it->second.allocate(vm.core, vm.memory, "A")) {
                     VMDeployInfo info = VMDeployInfo(pServerId, "A", vm);
                     pair<int, VMDeployInfo> deployedVMInfo(vmId, info);
                     deployVMOneDay.push_back(deployedVMInfo);
                 }
             }
             if (is_dual) {  // 双节点部署
-                if (it.second.allocate(vm.core, vm.memory, "AB")) {
+                if (it->second.allocate(vm.core, vm.memory, "AB")) {
                     VMDeployInfo info = VMDeployInfo(pServerId, "AB", vm);
                     pair<int, VMDeployInfo> deployedVMInfo(vmId, info);
                     deployVMOneDay.push_back(deployedVMInfo);
@@ -466,12 +460,7 @@ public:
                 string node = info.node;
                 int serverId = info.serverId;
                 // 释放服务器资源
-                auto its = ownedServerVec.begin();
-                for (; its != ownedServerVec.end(); its++) {  // 根据id在拥有的服务器中寻找
-                    if (its->first == serverId) {
-                        break;
-                    }
-                }
+                auto its = ownedServerMap.find(serverId);
                 if (vm.is_dual) {
                     its->second.addAvailableCore(vm.core / 2, node);
                     its->second.addAvailableMemory(vm.memory / 2, node);
@@ -495,12 +484,7 @@ public:
             string node = info.node;
             int serverId = info.serverId;
             // 释放服务器资源
-            auto its = ownedServerVec.begin();
-            for (; its != ownedServerVec.end(); its++) {  // 根据id在拥有的服务器中寻找
-                if (its->first == serverId) {
-                    break;
-                }
-            }
+            auto its = ownedServerMap.find(serverId);
             if (vm.is_dual) {  // node == "AB"
                 its->second.addAvailableCore(vm.core / 2, node);
                 its->second.addAvailableMemory(vm.memory / 2, node);
@@ -553,17 +537,11 @@ public:
 
     void migrateVM() {
         int migrateLimit = int(deployedVM.size() * 0.005) - 1;
-
-
         auto it = serverOwnedVM.begin();
         for (int migrateNum = 0; it != serverOwnedVM.end() && migrateNum <= migrateLimit; it++) {
             int serverId = it->first;  // 原来所在的服务器id
             if (it->second.size() <= 2) {  // 将服务器上拥有小于2个虚拟机的迁移
-                auto originalServer = ownedServerVec.begin();
-                for (; originalServer != ownedServerVec.end(); originalServer++) {  // 找到原服务器，目的是计算利用率
-                    if (originalServer->first == serverId)
-                        break;
-                }
+                auto originalServer = ownedServerMap.find(serverId);
                 for (auto i = it->second.begin(); i != it->second.end();) {  // 尝试迁移每一个虚拟机
                     VM vm = i->vm;  // 要迁移的虚拟机
                     int vmId = i->vmId;  // 要迁移的虚拟机id
@@ -571,7 +549,7 @@ public:
                     bool canMigrate = false;  // 是否可以进行迁移
                     int targetServerId;  // 目标服务器id
                     string targetNode;  // 目标服务器节点
-                    for (auto &ito: ownedServerVec) {  // 遍历查找可以放置的服务器
+                    for (auto &ito: ownedServerMap) {  // 遍历查找可以放置的服务器
                         if (ito.first != serverId) {  // 目的服务器与原服务器不同
                             if (vm.is_dual) {  // 双节点部署
                                 double currUtilizationRate = calcUtilizationRate(originalServer->second, "AB", 0, 0);
@@ -612,22 +590,11 @@ public:
                     }
 
                     if (canMigrate) {
-                        auto targetServer = ownedServerVec.begin();
-                        for (; targetServer != ownedServerVec.end(); targetServer++) {  // 找到目标服务器
-                            if (targetServer->first == targetServerId)
-                                break;
-                        }
-
                         // 在目标服务器上分配资源
+                        auto targetServer = ownedServerMap.find(targetServerId);
                         targetServer->second.allocate(vm.core, vm.memory, targetNode);
 
-                        // 原来服务器上的资源要释放
-//                        auto originalServer = ownedServerVec.begin();
-//                        for (; originalServer != ownedServerVec.end(); originalServer++) {  // 找到原服务器
-//                            if (originalServer->first == serverId) {
-//                                break;
-//                            }
-//                        }
+                        // 原服務器加上釋放的資源
                         if (vm.is_dual) {
                             originalServer->second.addAvailableCore(vm.core / 2, node);
                             originalServer->second.addAvailableMemory(vm.memory / 2, node);
@@ -661,18 +628,24 @@ public:
 
 
     void convertID() {
+        int purchaseNumberOneDay = 0;  // 一天中購買的服務器臺數
+        for (auto &ps: purchaseServerOneDay)
+            purchaseNumberOneDay += ps.second;
+
         map<int, int> convertMap;
         for (auto &pServerOneDay: purchaseServerOneDay) {
             string sType = pServerOneDay.first;
             int number = pServerOneDay.second;
             int counter = 0;  // 已经修改counter个sType的服务器id，sType的服务器在一天中有number台
-            for (auto it = ownedServerVec.rbegin(); it != ownedServerVec.rend() && counter < number; it++) {
-                // 当天部署的服务器在后端，所以倒序遍历
-                if (it->second.getServerType() == sType) {
+            for (int i=1; i<= purchaseNumberOneDay && counter < number; i++) {
+                auto serverInfo = ownedServerMap.find(nextTempId + i);
+                if (serverInfo != ownedServerMap.end() && serverInfo->second.getServerType() == sType) {
                     int newID = nextId;
                     nextId++;
-                    int oldID = it->first;
-                    it->first = newID;  // 将拥有的服务器id转换
+                    int oldID = serverInfo->first;
+                    Server s = serverInfo->second;
+                    ownedServerMap.emplace(newID, s);
+                    ownedServerMap.erase(oldID);
                     convertMap.emplace(oldID, newID);
                     counter++;
                 }
