@@ -549,10 +549,10 @@ public:
             bool canMigrate = false;  // 是否可以进行迁移
             int targetServerId;  // 目标服务器id
             string targetNode;  // 目标服务器节点
+            double currUtilizationRate = calcUtilizationRate(originalServer->second, node, 0, 0);
             for (auto &ito: ownedServerMap) {  // 遍历查找可以放置的服务器
                 if (ito.first != serverId) {  // 目的服务器与原服务器不同
                     if (vm.is_dual) {  // 双节点部署
-                        double currUtilizationRate = calcUtilizationRate(originalServer->second, "AB", 0, 0);
                         if (ito.second.getAAvailableCore() >= vm.core / 2 &&
                             ito.second.getAAvailableMemory() >= vm.memory / 2 &&
                             ito.second.getBAvailableCore() >= vm.core / 2 &&
@@ -566,7 +566,6 @@ public:
                             }
                         }
                     } else {  // if(!is_dual)
-                        double currUtilizationRate = calcUtilizationRate(originalServer->second, node, 0, 0);
                         if (ito.second.getAAvailableCore() >= vm.core &&
                             ito.second.getAAvailableMemory() >= vm.memory) {
                             double utilizationRate = calcUtilizationRate(ito.second, "A", vm.core, vm.memory);
