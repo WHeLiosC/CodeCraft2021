@@ -505,7 +505,8 @@ public:
         }
     }
 
-    static double calcUtilizationRate(Server &server, const string &node, const int allocateCoreNum, const int allocateMemoryNum) {
+    static double
+    calcUtilizationRate(Server &server, const string &node, const int allocateCoreNum, const int allocateMemoryNum) {
         // 分配一定资源后的资源利用率。后两个参数为0表示原服务器的利用率。
         if (node == "A") {
             double ACore = double(server.getCore()) / 2;
@@ -537,91 +538,94 @@ public:
 
     void migrateVM() {
         int migrateLimit = int(deployedVM.size() * 0.005) - 1;
-        auto it = serverOwnedVM.begin();
-        for (int migrateNum = 0; it != serverOwnedVM.end() && migrateNum <= migrateLimit; it++) {
-            int serverId = it->first;  // 原来所在的服务器id
-            if (it->second.size() <= 2) {  // 将服务器上拥有小于2个虚拟机的迁移
-                auto originalServer = ownedServerMap.find(serverId);
-                for (auto i = it->second.begin(); i != it->second.end();) {  // 尝试迁移每一个虚拟机
-                    VM vm = i->vm;  // 要迁移的虚拟机
-                    int vmId = i->vmId;  // 要迁移的虚拟机id
-                    string node = i->node;  // 要迁移的虚拟机原来所在的节点
-                    bool canMigrate = false;  // 是否可以进行迁移
-                    int targetServerId;  // 目标服务器id
-                    string targetNode;  // 目标服务器节点
-                    for (auto &ito: ownedServerMap) {  // 遍历查找可以放置的服务器
-                        if (ito.first != serverId) {  // 目的服务器与原服务器不同
-                            if (vm.is_dual) {  // 双节点部署
-                                double currUtilizationRate = calcUtilizationRate(originalServer->second, "AB", 0, 0);
-                                if (ito.second.getAAvailableCore() >= vm.core / 2 &&
-                                    ito.second.getAAvailableMemory() >= vm.memory / 2 &&
-                                    ito.second.getBAvailableCore() >= vm.core / 2 &&
-                                    ito.second.getBAvailableMemory() >= vm.memory / 2) {
-                                    double utilizationRate = calcUtilizationRate(ito.second, "AB", vm.core, vm.memory);
-                                    if (utilizationRate > currUtilizationRate) {
-                                        targetServerId = ito.first;
-                                        targetNode = "AB";
-                                        canMigrate = true;
-                                    }
-                                }
-                            }
-                            else {  // if(!is_dual)
-                                double currUtilizationRate = calcUtilizationRate(originalServer->second, node, 0, 0);
-                                if (ito.second.getAAvailableCore() >= vm.core &&
-                                    ito.second.getAAvailableMemory() >= vm.memory) {
-                                    double utilizationRate = calcUtilizationRate(ito.second, "A", vm.core, vm.memory);
-                                    if (utilizationRate > currUtilizationRate) {
-                                        targetServerId = ito.first;
-                                        targetNode = "A";
-                                        canMigrate = true;
-                                    }
-                                }
-                                if (ito.second.getBAvailableCore() >= vm.core &&
-                                    ito.second.getBAvailableMemory() >= vm.memory) {
-                                    double utilizationRate = calcUtilizationRate(ito.second, "B", vm.core, vm.memory);
-                                    if (utilizationRate > currUtilizationRate) {
-                                        targetServerId = ito.first;
-                                        targetNode = "B";
-                                        canMigrate = true;
-                                    }
-                                }
+        auto vmit = deployedVM.begin();
+        int migrateNum = 0;
+        for (; vmit != deployedVM.end() && migrateNum < migrateLimit; vmit++) {
+            int serverId = vmit->second.serverId;
+            auto originalServer = ownedServerMap.find(serverId);
+            VM vm = vmit->second.vm;  // 要迁移的虚拟机
+            int vmId = vmit->first;  // 要迁移的虚拟机id
+            string node = vmit->second.node;  // 要迁移的虚拟机原来所在的节点
+            bool canMigrate = false;  // 是否可以进行迁移
+            int targetServerId;  // 目标服务器id
+            string targetNode;  // 目标服务器节点
+            for (auto &ito: ownedServerMap) {  // 遍历查找可以放置的服务器
+                if (ito.first != serverId) {  // 目的服务器与原服务器不同
+                    if (vm.is_dual) {  // 双节点部署
+                        double currUtilizationRate = calcUtilizationRate(originalServer->second, "AB", 0, 0);
+                        if (ito.second.getAAvailableCore() >= vm.core / 2 &&
+                            ito.second.getAAvailableMemory() >= vm.memory / 2 &&
+                            ito.second.getBAvailableCore() >= vm.core / 2 &&
+                            ito.second.getBAvailableMemory() >= vm.memory / 2) {
+                            double utilizationRate = calcUtilizationRate(ito.second, "AB", vm.core, vm.memory);
+                            if (utilizationRate > currUtilizationRate) {
+                                currUtilizationRate = utilizationRate;
+                                targetServerId = ito.first;
+                                targetNode = "AB";
+                                canMigrate = true;
                             }
                         }
-                    }
-
-                    if (canMigrate) {
-                        // 在目标服务器上分配资源
-                        auto targetServer = ownedServerMap.find(targetServerId);
-                        targetServer->second.allocate(vm.core, vm.memory, targetNode);
-
-                        // 原服務器加上釋放的資源
-                        if (vm.is_dual) {
-                            originalServer->second.addAvailableCore(vm.core / 2, node);
-                            originalServer->second.addAvailableMemory(vm.memory / 2, node);
-                        } else {  // !vm.is_dual
-                            originalServer->second.addAvailableCore(vm.core, node);
-                            originalServer->second.addAvailableMemory(vm.memory, node);
+                    } else {  // if(!is_dual)
+                        double currUtilizationRate = calcUtilizationRate(originalServer->second, node, 0, 0);
+                        if (ito.second.getAAvailableCore() >= vm.core &&
+                            ito.second.getAAvailableMemory() >= vm.memory) {
+                            double utilizationRate = calcUtilizationRate(ito.second, "A", vm.core, vm.memory);
+                            if (utilizationRate > currUtilizationRate) {
+                                currUtilizationRate = utilizationRate;
+                                targetServerId = ito.first;
+                                targetNode = "A";
+                                canMigrate = true;
+                            }
                         }
-
-                        // 在serverOwnedVM中将该id服务器上的虚拟机信息清空
-                        i = it->second.erase(i);  // 删除后迭代器指向下一个元素（后面的元素前移）
-
-                        // serverOwnedVM中在目标服务器上添加该虚拟机的信息
-                        serverOwnedVM.find(targetServerId)->second.emplace_back(vmId, targetNode, vm);
-
-                        // 修改部署信息
-                        auto deployInfo = deployedVM.find(vmId);
-                        deployInfo->second.serverId = targetServerId;
-                        deployInfo->second.node = targetNode;
-
-                        // 记录迁移信息
-                        migrateInfoOneDay.emplace_back(vmId, targetServerId, targetNode);
-
-                        migrateNum++;
-                    } else {  // 不能迁移
-                        i++;
+                        if (ito.second.getBAvailableCore() >= vm.core &&
+                            ito.second.getBAvailableMemory() >= vm.memory) {
+                            double utilizationRate = calcUtilizationRate(ito.second, "B", vm.core, vm.memory);
+                            if (utilizationRate > currUtilizationRate) {
+                                currUtilizationRate = utilizationRate;
+                                targetServerId = ito.first;
+                                targetNode = "B";
+                                canMigrate = true;
+                            }
+                        }
                     }
                 }
+            }
+
+            if (canMigrate) {
+                // 在目标服务器上分配资源
+                auto targetServer = ownedServerMap.find(targetServerId);
+                targetServer->second.allocate(vm.core, vm.memory, targetNode);
+
+                // 原服務器加上釋放的資源
+                if (vm.is_dual) {
+                    originalServer->second.addAvailableCore(vm.core / 2, node);
+                    originalServer->second.addAvailableMemory(vm.memory / 2, node);
+                } else {  // !vm.is_dual
+                    originalServer->second.addAvailableCore(vm.core, node);
+                    originalServer->second.addAvailableMemory(vm.memory, node);
+                }
+
+                // 在serverOwnedVM中将该id服务器上的虚拟机信息清空
+                auto vmInfo = serverOwnedVM.find(serverId)->second;
+                auto vmi = vmInfo.begin();
+                for (;vmi!=vmInfo.end();vmi++){
+                    if (vmi->vmId == vmId)
+                        break;
+                }
+                vmInfo.erase(vmi);
+
+                // serverOwnedVM中在目标服务器上添加该虚拟机的信息
+                serverOwnedVM.find(targetServerId)->second.emplace_back(vmId, targetNode, vm);
+
+                // 修改部署信息
+                auto deployInfo = deployedVM.find(vmId);
+                deployInfo->second.serverId = targetServerId;
+                deployInfo->second.node = targetNode;
+
+                // 记录迁移信息
+                migrateInfoOneDay.emplace_back(vmId, targetServerId, targetNode);
+
+                migrateNum++;
             }
         }
     }
@@ -637,7 +641,7 @@ public:
             string sType = pServerOneDay.first;
             int number = pServerOneDay.second;
             int counter = 0;  // 已经修改counter个sType的服务器id，sType的服务器在一天中有number台
-            for (int i=1; i<= purchaseNumberOneDay && counter < number; i++) {
+            for (int i = 1; i <= purchaseNumberOneDay && counter < number; i++) {
                 auto serverInfo = ownedServerMap.find(nextTempId + i);
                 if (serverInfo != ownedServerMap.end() && serverInfo->second.getServerType() == sType) {
                     int newID = nextId;
